@@ -17,7 +17,6 @@ library(ggplot2)
 # read in file
 re_all = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/complete_file.csv", stringsAsFactors = FALSE) # stimulation data with serum cytokines, stimulation cytokines per medium, all parasite data, and eosinophil + all WBC data.
 
-# eosinophil counts
 mean(re_all$eos_st, na.rm = TRUE) # 2229.737
 median(re_all$eos_st, na.rm = TRUE) # 1950
 
@@ -232,19 +231,18 @@ Now we make forest plots for all the iterations
 
 ```{r}
 # create forest plot df. cytokine, beta, beta+1.96*se, beta-1.96*se
-allforest = read.csv("~/Desktop/Tsimane/all_forest.csv", stringsAsFactors = FALSE)
-allforest_redo = read.csv("~/Desktop/Tsimane/all_forest_redo.csv", stringsAsFactors = FALSE)
+allforest = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/forest_plots_Th.csv", stringsAsFactors = FALSE)
 
 order = c( 'LPS', 'H1N1')
-allforest_redo$Type = factor(allforest_redo$Type, levels=order)
+allforest$Type = factor(allforest$Type, levels=order)
 
 order1 = c( 'Male', 'Female')
-allforest_redo$Sex = factor(allforest_redo$Sex, levels=order1)
+allforest$Sex = factor(allforest$Sex, levels=order1)
 
 dotCOLS = c("#f9b282", "#a6d8f0")
 barCOLS = c("#de6b35", "#008fd5")
 
-ggplot(allforest_redo, aes(x=Type, y=Estimate, ymin=Lower_CI, ymax=Upper_CI, color = Sex, fill = Sex))+
+ggplot(allforest, aes(x=Type, y=Estimate, ymin=Lower_CI, ymax=Upper_CI, color = Sex, fill = Sex))+
  geom_linerange(size=.8,position=position_dodge(width = 0.5)) +
 geom_hline(yintercept=0, lty=2) +
 geom_point(size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
@@ -515,21 +513,19 @@ summary(glm(data = man_h1n1_anti, z_th2 ~ bmi + stim_age + log(eos_st) + log(c_l
 # now make tables for these and then make supplementary forest plots for these ones
 
 # create forest plot df. cytokine, beta, beta+1.96*se, beta-1.96*se
-suppforest = read.csv("~/Desktop/Tsimane/Supp_forest.csv", stringsAsFactors = FALSE)
+suppforest = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/forest_plots_proanti.csv", stringsAsFactors = FALSE)
 suppforest = suppforest[!(is.na(suppforest$Type)),]
-suppforest_redo = read.csv("~/Desktop/Tsimane/Supp_forest_redo.csv", stringsAsFactors = FALSE)
-suppforest_redo = suppforest_redo[!(is.na(suppforest_redo$Type)),]
 
 order = c( 'LPS', 'H1N1')
-suppforest_redo$Type = factor(suppforest_redo$Type, levels=order)
+suppforest$Type = factor(suppforest$Type, levels=order)
 
 order1 = c( 'Male', 'Female')
-suppforest_redo$Sex = factor(suppforest_redo$Sex, levels=order1)
+suppforest$Sex = factor(suppforest$Sex, levels=order1)
 
 dotCOLS = c("#f9b282", "#a6d8f0")
 barCOLS = c("#de6b35", "#008fd5")
 
-supptable = ggplot(suppforest_redo, aes(x=Type, y=Estimate, ymin=Lower_CI, ymax=Upper_CI, color = Sex, fill = Sex))+
+supptable = ggplot(suppforest, aes(x=Type, y=Estimate, ymin=Lower_CI, ymax=Upper_CI, color = Sex, fill = Sex))+
  geom_linerange(size=.8,position=position_dodge(width = 0.5)) +
 geom_hline(yintercept=0, lty=2) +
 geom_point(size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
@@ -568,7 +564,7 @@ L_M_mod = metagen(Estimate, Std..Error,data=L_M, studlab=paste(Cytokine),comb.fi
 L_A_mod = metagen(Estimate, Std..Error,data=L_A, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
 
 # add meta results to df
-met = read.csv("~/Desktop/Tsimane/meta.csv", stringsAsFactors = FALSE)
+met = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/meta_stat.csv", stringsAsFactors = FALSE)
 heatmeta = rbind(heatall, met)
 
 # now remove the overrall ones
@@ -643,7 +639,7 @@ summary(glm(data = men_all, log(tnf_a) ~ bmi + stim_age + pregnant + log(eos_st)
 Plot serum cytokines 
 
 ```{r}
-serum = read.csv("~/Desktop/Tsimane/serum_forest.csv", stringsAsFactors = FALSE)
+serum = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/serum_forest.csv", stringsAsFactors = FALSE)
 
 # select only eosinophils
 serum = serum[serum$Predictor.Variables == "Eosinophil count (logged)",]
@@ -656,7 +652,7 @@ S_F_mod = metagen(Estimate, Std..Error,data=S_F, studlab=paste(Cytokine),comb.fi
 S_M_mod = metagen(Estimate, Std..Error,data=S_M, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
 
 # add overall meta result to heatall df
-serum = read.csv("~/Desktop/Tsimane/serum_forest.csv", stringsAsFactors = FALSE)
+serum = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/serum_forest.csv", stringsAsFactors = FALSE)
 
 # fix cytokine names
 serum$Cytokine = ifelse(serum$Cytokine == "IFNg", "IFN\u03B3", serum$Cytokine)
@@ -716,4 +712,5 @@ summary(glm(a_lum ~ male_stim*stim_age, family = "binomial", data = re_all))
 summary(glm(t_trich ~ male_stim*stim_age, family = "binomial", data = re_all))
 summary(glm(unc ~ male_stim*stim_age, family = "binomial", data = re_all))
 summary(glm(strong ~ male_stim*stim_age, family = "binomial", data = re_all))
+
 ```
