@@ -14,129 +14,10 @@ library(tidyverse)
 library(plyr)
 library(ggplot2)
 
-# stimulation cytokine file
-stims = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/stimulation_wide_github.csv", stringsAsFactors = FALSE) # stimulation data
+# read in file
+re_all = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/complete_file.csv", stringsAsFactors = FALSE) # stimulation data
 
-# examine these data
-nrow(stims) # 1376
-length(unique(stims$pid)) #328
-length(unique(stims$vid)) #328
-length(unique(stims$midpid_16)) #328
-length(unique(stims$CytoID_stim)) #328
 
-# parasite file
-par.d.plus = read.csv("~/Desktop/Tsimane/parasite_data_plus.csv", stringsAsFactors = FALSE) # parasite data and more
-nrow(par.d.plus) #7822
-length(unique(par.d.plus$pid)) #4351
-length(unique(par.d.plus$vid)) #7822
-
-# select relevant parasite file columns
-manag_2 = par.d.plus %>% dplyr::select(comunid, c_leucocitos, pid, sex_final, edad, c_eosinophils, c_hb, crp_mgdl, t_pgml, embarazada, bmi, edadestimado,  gm_csf, ifng, il_10, il_12p70, il_13, il_1b, il_2,il_4, il_5, il_6, il_7, il_8, tnf_a, a_lum, b_hom, b_col, c_mes, e_col, e_hist, e_verm, g_lam, h_dim, h_nan, strong, t_trich, unc, I_but, PSR, vid)
-
-# change all 0.00 values to 0.01s to avoid infinity values when calculating percent change 
-manag_2[, 13:25][manag_2[, 13:25] == 0] = 0.01
-
-# Make a variable for each category richness (5 helminths, 3 protozoa, 3 nonpath amoebae, 1 bacteria (all genus level counts)), and 0/1 by type.
-
-# assign PSR by type
-# helminths: col 25, 31, 35-37
-manag_2$hrich = rowSums(manag_2[, c(26, 32, 36:38)])
-
-# protozoa: col 26, 27, 32 
-manag_2$prich = rowSums(manag_2[, c(27, 28, 33)])
-
-# cestode: col 33, 34 
-manag_2$crich = rowSums(manag_2[, c(34, 35)])
-
-# amoeba: 30, 38
-manag_2$arich = rowSums(manag_2[, c(29, 39)])
-
-# bacteria: 29
-manag_2$brich = manag_2$e_col
-
-# If helminth richenss > 0, then helminth presence = 1 if not, 0
-manag_2$h_pres = ifelse(manag_2$hrich > 0, 1, 0)
-manag_2$p_pres = ifelse(manag_2$prich > 0, 1, 0)
-manag_2$c_pres = ifelse(manag_2$crich > 0, 1, 0)
-manag_2$a_pres = ifelse(manag_2$arich > 0, 1, 0)
-manag_2$b_pres = ifelse(manag_2$brich > 0, 1, 0)
-
-# merge the parasite and the stimulation file by VID
-stim_full = left_join(manag_2, stims, by = "vid")
-
-## remove those in the new dataset without stim ID
-stim_trim = stim_full[!(is.na(stim_full$CytoID_stim)),]
-nrow(stim_trim) #885
-length(unique(stim_trim$vid)) #211
-length(unique(stim_trim$pid.x)) #211
-
-## calculate age at stim using year.stim and draw date
-library(lubridate)
-stim_trim$Draw.Date_stim = mdy(stim_trim$Draw.Date_stim)
-stim_trim$draw_year = as.integer(substr(stim_trim$Draw.Date_stim, 1, 4)) # oh lol all 2011
-stim_trim$stim_age = stim_trim$draw_year - stim_trim$Year_stim
-```
-
-So for our models and figures, we need to have (1) individual metadata, (2) eosinophils + leucocytes, (3) parasite presence and richness, (4) serum cytokines, (5) stim + stim type cytokines. Then we (a) make eos_st (standardized eosinophils by leucocytes) and (b) cytokine levels for each of the stim types.
-
-```{r}
-# select only adults over 18
-stim_nokids = stim_trim[stim_trim$stim_age >=18,]
-stim_nokids = stim_nokids %>% dplyr::rename(pid = pid.x)
-
-# merge with pregnancy data
-preg = read.csv("~/Desktop/Tsimane/pregnancy.csv", stringsAsFactors = FALSE)
-preg = preg %>% dplyr::select(pid, pregnant)
-
-# merge
-stim_nokids = merge(stim_nokids, preg, by = "pid", all.x = TRUE)
-
-#select only the stims from the nokids df
-redo = stim_nokids %>% dplyr::select(vid, StimType_stim, GM.CSF_stim, IFNg_stim, IL.10_stim,IL.12p70_stim, IL.13_stim, IL.1b_stim,IL.2_stim,IL.4_stim, IL.5_stim,IL.6_stim,IL.7_stim,IL.8_stim,TNF.a_stim)
-
-#Now we have to transform the columnn names within each subset to have _LPS/PHA/ETC to tell them apart. So first have to add the name, then have to remove the STIM TYPE because it's now redundant, and then rename the VID, which shouldn't have the _suffix on it. Do for each condition. 
-
-#LPS
-redo_lps = redo[redo$StimType_stim == "LPS",]
-colnames(redo_lps) <- paste0(colnames(redo_lps), "_lps")
-redo_lps = redo_lps %>% dplyr::select(-StimType_stim_lps)
-redo_lps = redo_lps %>% dplyr::rename(vid = vid_lps)
-
-#RPMI
-redo_rpmi = redo[redo$StimType_stim == "RPMI",]
-colnames(redo_rpmi) <- paste0(colnames(redo_rpmi), "_rpmi")
-redo_rpmi = redo_rpmi %>% dplyr::select(-StimType_stim_rpmi)
-redo_rpmi = redo_rpmi %>% dplyr::rename(vid = vid_rpmi)
-
-#PHA
-redo_pha = redo[redo$StimType_stim == "PHA",]
-colnames(redo_pha) <- paste0(colnames(redo_pha), "_pha")
-redo_pha = redo_pha %>% dplyr::select(-StimType_stim_pha)
-redo_pha = redo_pha %>% dplyr::rename(vid = vid_pha)
-
-#H1N1
-redo_h1n1 = redo[redo$StimType_stim == "H1N1",]
-colnames(redo_h1n1) <- paste0(colnames(redo_h1n1), "_h1n1")
-redo_h1n1 = redo_h1n1 %>% dplyr::select(-StimType_stim_h1n1)
-redo_h1n1 = redo_h1n1 %>% dplyr::rename(vid = vid_h1n1)
-
-#ASC
-redo_asc = redo[redo$StimType_stim == "ASC",]
-colnames(redo_asc) <- paste0(colnames(redo_asc), "_asc")
-redo_asc = redo_asc %>% dplyr::select(-StimType_stim_asc)
-redo_asc = redo_asc %>% dplyr::rename(vid = vid_asc)
-
-# now merge all of those together. There's probably a better way to do this.
-remerge = left_join(redo_lps, redo_rpmi)
-remerge1 = left_join(remerge, redo_pha)
-remerge2 = left_join(remerge1, redo_h1n1)
-remerge3 = left_join(remerge2, redo_asc)
-
-# now get the metadata columns we want
-redo_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,gm_csf, ifng, il_10, il_12p70, il_13, il_1b,il_2,il_4,il_5,il_6,il_7,il_8,tnf_a, a_lum, b_hom,b_col,e_col, e_hist,e_verm,g_lam,h_dim, h_nan,strong, t_trich,unc,I_but,  c_leucocitos, c_eosinophils, pregnant ) 
-
-# merge
-re_all = left_join(remerge3, redo_meta)
 ```
 
 Now we have the full dataset. It includes serum cytokines, stimulation cytokines per medium, all parasite data, and eosinophils + leucocytes.
@@ -433,18 +314,6 @@ scale_color_manual(values=dotCOLS_1, guide=FALSE)+
 scale_y_continuous(name="Eosinophil Effect (95% CI)", limits = c(-7, 2), breaks=seq(-6,2,2)) +
 theme_classic(base_size=18 ) +
 facet_wrap(~Medum, ncol = 2, ) + theme(axis.title.y = element_blank(), strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=20), legend.title = element_blank(),axis.text.x = element_text(vjust =1, hjust=0, size = 16)) + guides(fill = guide_legend(override.aes = list(linetype=0), reverse = TRUE)) + coord_flip() 
-```
-
-Now add in anti-helminth data. it appears that we have treatments for non-helminth infections in here (metronidazol, tinidizol) so we'll NA those and make yearrs priior anti helminth NA for those as well. Gah. 
-
-```{r}
-antistim = read.csv("~/Desktop/Tsimane/stim_anti_helminths.csv", stringsAsFactors = FALSE)
-antistim = antistim %>% dplyr::select(vid, years_prior_anti_helminth, type_anti_helminth)
-antistim$type_anti_helminth = ifelse(antistim$type_anti_helminth == "metronidazol" | antistim$type_anti_helminth == "tinidazol", NA, antistim$type_anti_helminth)
-
-# merge with re_all
-reall_anti = merge(re_all, antistim, by = "vid", all.x = TRUE)
-
 ```
 
 Make forest plots for additional variables.
@@ -862,5 +731,4 @@ summary(glm(a_lum ~ male_stim*stim_age, family = "binomial", data = re_all))
 summary(glm(t_trich ~ male_stim*stim_age, family = "binomial", data = re_all))
 summary(glm(unc ~ male_stim*stim_age, family = "binomial", data = re_all))
 summary(glm(strong ~ male_stim*stim_age, family = "binomial", data = re_all))
-
 ```
