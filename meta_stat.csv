@@ -1,0 +1,7 @@
+﻿Cytokine,Model.Type..AIC.,Predictor,Estimate,Sex,Medum,Lower_CI,Upper_CI
+Overall,,Eosinophil count (logged),-0.7966,Female,H1N1,-1.0752,-0.518
+Overall,,Eosinophil count (logged),-0.7062,Male,H1N1,-0.9966,-0.4158
+Overall,,Eosinophil count (logged),-0.7532,All,H1N1,-0.9543,-0.5522
+Overall,,Eosinophil count (logged),-0.8329,Female,LPS,-1.0708,-0.595
+Overall,,Eosinophil count (logged),-0.4669,Male,LPS,-0.6618,-0.2719
+Overall,,Eosinophil count (logged),-0.6139,All,LPS,-0.7646,-0.4631
