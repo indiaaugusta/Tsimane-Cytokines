@@ -1,0 +1,866 @@
+---
+title: "ISC_Tsimane_cytokine_github.Rmd"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+Tsimane helminth and cytokine models and plots
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(plyr)
+library(ggplot2)
+
+# stimulation cytokine file
+stims = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/stimulation_wide_github.csv", stringsAsFactors = FALSE) # stimulation data
+
+# examine these data
+nrow(stims) # 1376
+length(unique(stims$pid)) #328
+length(unique(stims$vid)) #328
+length(unique(stims$midpid_16)) #328
+length(unique(stims$CytoID_stim)) #328
+
+# parasite file
+par.d.plus = read.csv("~/Desktop/Tsimane/parasite_data_plus.csv", stringsAsFactors = FALSE) # parasite data and more
+nrow(par.d.plus) #7822
+length(unique(par.d.plus$pid)) #4351
+length(unique(par.d.plus$vid)) #7822
+
+# select relevant parasite file columns
+manag_2 = par.d.plus %>% dplyr::select(comunid, c_leucocitos, pid, sex_final, edad, c_eosinophils, c_hb, crp_mgdl, t_pgml, embarazada, bmi, edadestimado,  gm_csf, ifng, il_10, il_12p70, il_13, il_1b, il_2,il_4, il_5, il_6, il_7, il_8, tnf_a, a_lum, b_hom, b_col, c_mes, e_col, e_hist, e_verm, g_lam, h_dim, h_nan, strong, t_trich, unc, I_but, PSR, vid)
+
+# change all 0.00 values to 0.01s to avoid infinity values when calculating percent change 
+manag_2[, 13:25][manag_2[, 13:25] == 0] = 0.01
+
+# Make a variable for each category richness (5 helminths, 3 protozoa, 3 nonpath amoebae, 1 bacteria (all genus level counts)), and 0/1 by type.
+
+# assign PSR by type
+# helminths: col 25, 31, 35-37
+manag_2$hrich = rowSums(manag_2[, c(26, 32, 36:38)])
+
+# protozoa: col 26, 27, 32 
+manag_2$prich = rowSums(manag_2[, c(27, 28, 33)])
+
+# cestode: col 33, 34 
+manag_2$crich = rowSums(manag_2[, c(34, 35)])
+
+# amoeba: 30, 38
+manag_2$arich = rowSums(manag_2[, c(29, 39)])
+
+# bacteria: 29
+manag_2$brich = manag_2$e_col
+
+# If helminth richenss > 0, then helminth presence = 1 if not, 0
+manag_2$h_pres = ifelse(manag_2$hrich > 0, 1, 0)
+manag_2$p_pres = ifelse(manag_2$prich > 0, 1, 0)
+manag_2$c_pres = ifelse(manag_2$crich > 0, 1, 0)
+manag_2$a_pres = ifelse(manag_2$arich > 0, 1, 0)
+manag_2$b_pres = ifelse(manag_2$brich > 0, 1, 0)
+
+# merge the parasite and the stimulation file by VID
+stim_full = left_join(manag_2, stims, by = "vid")
+
+## remove those in the new dataset without stim ID
+stim_trim = stim_full[!(is.na(stim_full$CytoID_stim)),]
+nrow(stim_trim) #885
+length(unique(stim_trim$vid)) #211
+length(unique(stim_trim$pid.x)) #211
+
+## calculate age at stim using year.stim and draw date
+library(lubridate)
+stim_trim$Draw.Date_stim = mdy(stim_trim$Draw.Date_stim)
+stim_trim$draw_year = as.integer(substr(stim_trim$Draw.Date_stim, 1, 4)) # oh lol all 2011
+stim_trim$stim_age = stim_trim$draw_year - stim_trim$Year_stim
+```
+
+So for our models and figures, we need to have (1) individual metadata, (2) eosinophils + leucocytes, (3) parasite presence and richness, (4) serum cytokines, (5) stim + stim type cytokines. Then we (a) make eos_st (standardized eosinophils by leucocytes) and (b) cytokine levels for each of the stim types.
+
+```{r}
+# select only adults over 18
+stim_nokids = stim_trim[stim_trim$stim_age >=18,]
+stim_nokids = stim_nokids %>% dplyr::rename(pid = pid.x)
+
+# merge with pregnancy data
+preg = read.csv("~/Desktop/Tsimane/pregnancy.csv", stringsAsFactors = FALSE)
+preg = preg %>% dplyr::select(pid, pregnant)
+
+# merge
+stim_nokids = merge(stim_nokids, preg, by = "pid", all.x = TRUE)
+
+#select only the stims from the nokids df
+redo = stim_nokids %>% dplyr::select(vid, StimType_stim, GM.CSF_stim, IFNg_stim, IL.10_stim,IL.12p70_stim, IL.13_stim, IL.1b_stim,IL.2_stim,IL.4_stim, IL.5_stim,IL.6_stim,IL.7_stim,IL.8_stim,TNF.a_stim)
+
+#Now we have to transform the columnn names within each subset to have _LPS/PHA/ETC to tell them apart. So first have to add the name, then have to remove the STIM TYPE because it's now redundant, and then rename the VID, which shouldn't have the _suffix on it. Do for each condition. 
+
+#LPS
+redo_lps = redo[redo$StimType_stim == "LPS",]
+colnames(redo_lps) <- paste0(colnames(redo_lps), "_lps")
+redo_lps = redo_lps %>% dplyr::select(-StimType_stim_lps)
+redo_lps = redo_lps %>% dplyr::rename(vid = vid_lps)
+
+#RPMI
+redo_rpmi = redo[redo$StimType_stim == "RPMI",]
+colnames(redo_rpmi) <- paste0(colnames(redo_rpmi), "_rpmi")
+redo_rpmi = redo_rpmi %>% dplyr::select(-StimType_stim_rpmi)
+redo_rpmi = redo_rpmi %>% dplyr::rename(vid = vid_rpmi)
+
+#PHA
+redo_pha = redo[redo$StimType_stim == "PHA",]
+colnames(redo_pha) <- paste0(colnames(redo_pha), "_pha")
+redo_pha = redo_pha %>% dplyr::select(-StimType_stim_pha)
+redo_pha = redo_pha %>% dplyr::rename(vid = vid_pha)
+
+#H1N1
+redo_h1n1 = redo[redo$StimType_stim == "H1N1",]
+colnames(redo_h1n1) <- paste0(colnames(redo_h1n1), "_h1n1")
+redo_h1n1 = redo_h1n1 %>% dplyr::select(-StimType_stim_h1n1)
+redo_h1n1 = redo_h1n1 %>% dplyr::rename(vid = vid_h1n1)
+
+#ASC
+redo_asc = redo[redo$StimType_stim == "ASC",]
+colnames(redo_asc) <- paste0(colnames(redo_asc), "_asc")
+redo_asc = redo_asc %>% dplyr::select(-StimType_stim_asc)
+redo_asc = redo_asc %>% dplyr::rename(vid = vid_asc)
+
+# now merge all of those together. There's probably a better way to do this.
+remerge = left_join(redo_lps, redo_rpmi)
+remerge1 = left_join(remerge, redo_pha)
+remerge2 = left_join(remerge1, redo_h1n1)
+remerge3 = left_join(remerge2, redo_asc)
+
+# now get the metadata columns we want
+redo_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,gm_csf, ifng, il_10, il_12p70, il_13, il_1b,il_2,il_4,il_5,il_6,il_7,il_8,tnf_a, a_lum, b_hom,b_col,e_col, e_hist,e_verm,g_lam,h_dim, h_nan,strong, t_trich,unc,I_but,  c_leucocitos, c_eosinophils, pregnant ) 
+
+# merge
+re_all = left_join(remerge3, redo_meta)
+```
+
+Now we have the full dataset. It includes serum cytokines, stimulation cytokines per medium, all parasite data, and eosinophils + leucocytes.
+
+```{r}
+# standardize eosinophilis
+re_all$eos_st = (re_all$c_leucocitos*re_all$c_eosinophils)/100
+hist(re_all$eos_st) 
+
+nrow(re_all) # 790
+nrow(unique(re_all)) # 179
+
+re_all = unique(re_all)
+nrow(re_all) # 179
+
+mean(re_all$eos_st, na.rm = TRUE) # 2229.737
+median(re_all$eos_st, na.rm = TRUE) # 1950
+
+eosplot = re_all %>% ggplot(aes(eos_st)) + geom_histogram(binwidth = 200, fill = "darkseagreen", color = "black") + theme_classic() + geom_vline(aes(xintercept=mean(re_all$eos_st, na.rm = TRUE)), color="darkslateblue", linetype="dashed", size=1.8) + scale_x_continuous(breaks=seq(0,8000,1000)) + geom_vline(aes(xintercept=500), color="orange", linetype="dashed", size=1.8) + xlab("eosinophils")  + theme(text = element_text(size=20)) + labs(tag = "a")
+
+# bin eosinophils
+re_all$bin_eos_1500 = ifelse(re_all$eos_st > 1500, 1, 0)
+re_all$bin_eos_3000 = ifelse(re_all$eos_st > 3000, 1, 0)
+
+re_all_1500 = re_all[!is.na(re_all$bin_eos_1500),]
+re_all_3000 = re_all[!is.na(re_all$bin_eos_3000),]
+
+```
+
+Stimulation data- LPS and H1N1 Cytokines as a function of eosinophils. Figures and models.
+
+```{r}
+
+# split by sex 
+
+wom_all = re_all[re_all$male_stim == 0,]
+men_all = re_all[re_all$male_stim == 1,]
+
+######################################## LPS #############################################
+
+######################### Women ######################### 
+
+summary(glm(data = wom_all, log(IFNg_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.1b_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.2_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.4_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.5_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.6_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.7_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.8_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.10_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.12p70_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.13_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(GM.CSF_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(TNF.a_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+
+######################### Men ######################### 
+
+summary(glm(data = men_all, log(IFNg_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.1b_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.2_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.4_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.5_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.6_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.7_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.8_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.10_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.12p70_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.13_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(GM.CSF_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(TNF.a_stim_lps) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+
+######################################## H1N1 #############################################
+
+######################### Women ######################### 
+
+summary(glm(data = wom_all, log(IFNg_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.1b_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.2_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.4_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.5_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.6_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.7_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.8_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.10_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.12p70_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(IL.13_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(GM.CSF_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(TNF.a_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+
+######################### Men ######################### 
+
+summary(glm(data = men_all, log(IFNg_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.1b_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.2_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.4_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.5_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.6_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.7_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.8_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.10_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.12p70_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(IL.13_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(GM.CSF_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(TNF.a_stim_h1n1) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+
+
+```
+
+Now we are making z-scores for each individual's Th1 and Th2 cytokine profiles, which are averages of the transformed z-scores of all of their cytokines within each suite. We do it for each condition separately.
+
+Add 1 and then log, and then z-score
+
+```{r}
+# add 1 and then log before z-score
+addlogfun = function(x){log(x+1)}
+addlog = as.data.frame(apply(re_all[,2:66], 2, addlogfun))
+
+# Z-score transformation
+normFunc <- function(x){(x-mean(x, na.rm = T))/sd(x, na.rm = T)}
+forz = apply(addlog[,1:65], 2, normFunc)
+forz1 = as.data.frame(cbind(forz, re_all$vid, re_all$eos_st, re_all$male_stim))
+
+# TH1 in LPS
+lpsfirst_1 = forz1 %>% dplyr::select(V66, V67,V68, IFNg_stim_lps, IL.2_stim_lps)
+lpsfirst_1 = lpsfirst_1 %>% dplyr::rename(vid = V66, eos_st = V67, male = V68)
+lps_means_1 = lpsfirst_1 %>% dplyr::select(-c(vid, eos_st, male))
+lps_means_1 = mutate_all(lps_means_1, function(x) as.numeric(as.character(x)))
+lps_means_1$z_th1 = rowMeans(lps_means_1, na.rm = TRUE)
+lps_z1 = cbind(lps_means_1, lpsfirst_1$vid, lpsfirst_1$eos_st, lpsfirst_1$male)
+lps_z1 = lps_z1 %>% dplyr::rename(vid = 'lpsfirst_1$vid', eos_st = 'lpsfirst_1$eos_st', male = 'lpsfirst_1$male')
+lps_z1$eos_st = as.numeric(as.character(lps_z1$eos_st))
+
+# add metadata
+new_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,c_leucocitos, c_eosinophils, pregnant ) 
+
+# merge
+th1_lps = left_join(lps_z1, new_meta)
+th1_lps = unique(th1_lps)
+
+# split by sex
+fem = th1_lps[th1_lps$male_stim == 0,]
+maless = th1_lps[th1_lps$male_stim == 1,]
+
+# model 
+summary(glm(data = fem, z_th1 ~ bmi + stim_age + log(eos_st) + pregnant + log(c_leucocitos)))
+summary(glm(data = maless, z_th1 ~ bmi + stim_age + log(eos_st) +  log(c_leucocitos)))
+
+## now Th2 in LPS
+lpsfirst_2 = forz1 %>% dplyr::select(V66, V67, IL.4_stim_lps,IL.5_stim_lps, IL.13_stim_lps)
+lpsfirst_2 = lpsfirst_2 %>% dplyr::rename(vid = V66, eos_st = V67)
+row_means_2 = lpsfirst_2 %>% dplyr::select(-c(vid, eos_st))
+row_means_2 = mutate_all(row_means_2, function(x) as.numeric(as.character(x)))
+row_means_2$z_th2 = rowMeans(row_means_2)
+lps_z_th2 = cbind(row_means_2, lpsfirst_2$vid, lpsfirst_2$eos_st)
+lps_z_th2 = lps_z_th2 %>% dplyr::rename(vid = 'lpsfirst_2$vid', eos_st = 'lpsfirst_2$eos_st')
+lps_z_th2$eos_st = as.numeric(as.character(lps_z_th2$eos_st))
+
+# add metadata
+new_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,c_leucocitos, c_eosinophils, pregnant ) 
+
+# merge
+th2_lps = left_join(lps_z_th2, new_meta)
+th2_lps = unique(th2_lps)
+
+# split by sex
+fem2 = th2_lps[th2_lps$male_stim == 0,]
+male2 = th2_lps[th2_lps$male_stim == 1,]
+
+# model 
+summary(glm(data = fem2, z_th2 ~ bmi + stim_age + log(eos_st) + pregnant + log(c_leucocitos)))
+summary(glm(data = male2, z_th2 ~ bmi + stim_age + log(eos_st) + log(c_leucocitos)))
+
+# Th1 in H1N1
+hn_1 = forz1 %>% dplyr::select(V66, V67,IFNg_stim_h1n1, IL.2_stim_h1n1)
+hn_1 = hn_1 %>% dplyr::rename(vid = V66, eos_st = V67)
+h1n1_means_1 = hn_1 %>% dplyr::select(-c(vid, eos_st))
+h1n1_means_1 = mutate_all(h1n1_means_1, function(x) as.numeric(as.character(x)))
+h1n1_means_1$z_th1 = rowMeans(h1n1_means_1)
+h1n1_z_th1 = cbind(h1n1_means_1, hn_1$vid, hn_1$eos_st)
+h1n1_z_th1 = h1n1_z_th1 %>% dplyr::rename(vid = 'hn_1$vid', eos_st = 'hn_1$eos_st')
+h1n1_z_th1$eos_st = as.numeric(as.character(h1n1_z_th1$eos_st))
+
+# add metadata
+new_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,c_leucocitos, c_eosinophils, pregnant ) 
+
+# merge
+th1_h1n1 = left_join(h1n1_z_th1, new_meta)
+th1_h1n1 = unique(th1_h1n1)
+
+# split by sex
+fem_h1n1_1 = th1_h1n1[th1_h1n1$male_stim == 0,]
+man_h1n1_1 = th1_h1n1[th1_h1n1$male_stim == 1,]
+
+# model 
+summary(glm(data = fem_h1n1_1, z_th1 ~ bmi + stim_age + log(eos_st) + pregnant + log(c_leucocitos)))
+summary(glm(data = man_h1n1_1, z_th1 ~ bmi + stim_age + log(eos_st) + log(c_leucocitos)))
+
+## now Th2 in H1n1
+h1n1_2 = forz1 %>% dplyr::select(V66, V67, IL.4_stim_h1n1,IL.5_stim_h1n1, IL.13_stim_h1n1)
+h1n1_2 = h1n1_2 %>% dplyr::rename(vid = V66, eos_st = V67)
+h1n1_means_2 = h1n1_2 %>% dplyr::select(-c(vid, eos_st))
+h1n1_means_2 = mutate_all(h1n1_means_2, function(x) as.numeric(as.character(x)))
+h1n1_means_2$z_th2 = rowMeans(h1n1_means_2)
+h1n1_z_th2 = cbind(h1n1_means_2, h1n1_2$vid, h1n1_2$eos_st)
+h1n1_z_th2 = h1n1_z_th2 %>% dplyr::rename(vid = 'h1n1_2$vid', eos_st = 'h1n1_2$eos_st')
+h1n1_z_th2$eos_st = as.numeric(as.character(h1n1_z_th2$eos_st))
+
+# add metadata
+new_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,c_leucocitos, c_eosinophils, pregnant ) 
+
+# merge
+th2_h1n1 = left_join(h1n1_z_th2, new_meta)
+th2_h1n1 = unique(th2_h1n1)
+
+# split by sex
+fem_h1n1_2 = th2_h1n1[th2_h1n1$male_stim == 0,]
+man_h1n1_2 = th2_h1n1[th2_h1n1$male_stim == 1,]
+
+# model 
+summary(glm(data = fem_h1n1_2, z_th2 ~ bmi + stim_age + log(eos_st) + pregnant + log(c_leucocitos)))
+summary(glm(data = man_h1n1_2, z_th2 ~ bmi + stim_age + log(eos_st) + log(c_leucocitos)))
+
+```
+
+Now we make forest plots for all the iterations
+
+```{r}
+# create forest plot df. cytokine, beta, beta+1.96*se, beta-1.96*se
+allforest = read.csv("~/Desktop/Tsimane/all_forest.csv", stringsAsFactors = FALSE)
+allforest_redo = read.csv("~/Desktop/Tsimane/all_forest_redo.csv", stringsAsFactors = FALSE)
+
+order = c( 'LPS', 'H1N1')
+allforest_redo$Type = factor(allforest_redo$Type, levels=order)
+
+order1 = c( 'Male', 'Female')
+allforest_redo$Sex = factor(allforest_redo$Sex, levels=order1)
+
+dotCOLS = c("#f9b282", "#a6d8f0")
+barCOLS = c("#de6b35", "#008fd5")
+
+ggplot(allforest_redo, aes(x=Type, y=Estimate, ymin=Lower_CI, ymax=Upper_CI, color = Sex, fill = Sex))+
+ geom_linerange(size=.8,position=position_dodge(width = 0.5)) +
+geom_hline(yintercept=0, lty=2) +
+geom_point(size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+scale_fill_manual(values=barCOLS, guide=TRUE)+
+scale_color_manual(values=dotCOLS, guide=FALSE)+
+scale_x_discrete(name="") +
+scale_y_continuous(name="Eosinophil Effect (95% CI)", limits = c(-3, 3)) +
+coord_flip() +
+theme_classic(base_size=18 ) +
+  facet_wrap(~Set, ncol = 1, ) + theme(strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=18), legend.title = element_blank()) + guides(fill = guide_legend(override.aes = list(linetype=0), reverse = TRUE))
+
+```
+
+Now we do heatmap
+
+```{r}
+heatall = read.csv("~/Desktop/Tsimane/heatmap_lps.csv", stringsAsFactors = FALSE)
+
+# fix cytokine names
+heatall$Cytokine = ifelse(heatall$Cytokine == "IFNg", "IFN\u03B3", heatall$Cytokine)
+heatall$Cytokine = ifelse(heatall$Cytokine == "1b", "IL-1\u03B2", heatall$Cytokine)
+heatall$Cytokine = ifelse(heatall$Cytokine == "TNF", "TNF-\u03B1", heatall$Cytokine)
+heatall$Cytokine = ifelse(heatall$Cytokine == "GM", "GM-CSF", heatall$Cytokine)
+
+# define colors and order
+dotCOLS_1 = c( "#f9b282","#a6d8f0")
+barCOLS_1 = c("#de6b35", "#008fd5" )
+
+order5 = c( 'TNF-α', 'GM-CSF','IL-12p70', 'IL-10', 'IL-8', 'IL-7', 'IL-6', 'IL-1β','IL-13','IL-5', 'IL-4', 'IL-2', 'IFNγ')
+heatall$Cytokine = factor(heatall$Cytokine, levels=order5)
+
+order4 = c(  'Male', 'Female')
+heatall$Sex = factor(heatall$Sex, levels=order4)
+
+# make categories th1/th2/ambiguous
+heatall$type = ifelse(heatall$Cytokine == "IFNγ" | heatall$Cytokine == "IL-2", "Th1", NA)
+heatall$type = ifelse(heatall$Cytokine == "IL-4" | heatall$Cytokine == "IL-5" | heatall$Cytokine == "IL-13", "Th2", "Ambiv")
+
+# plot
+
+ggplot() +
+  geom_rect(data=ToothGrowth,xmin = 0, xmax = 8.5, ymin = -7, ymax = 3, fill = '#e6e8e8', alpha = 0.01) + geom_rect(data=ToothGrowth,xmin = 8.5, xmax = 11.5, ymin = -7, ymax = 3, fill = '#fae8c8', alpha = 0.01) + geom_rect(data=ToothGrowth,xmin = 11.5, xmax = 14, ymin = -7, ymax = 3, fill = '#eddff5', alpha = 0.05) +
+#geom_rect(data=ToothGrowth,xmin = 0, xmax = 8.5, ymin = -7, ymax = 2, fill = '#cbd5e8', alpha = 0.08) + geom_rect(data=ToothGrowth,xmin = 8.5, xmax = 11.5, ymin = -7, ymax = 2, fill = '#fdcdac', alpha = 0.08) + geom_rect(data=ToothGrowth,xmin = 11.5, xmax = 14, ymin = -7, ymax = 2, fill = '#b3e2cd', alpha = 0.08) +
+geom_text(data=data.frame(0),x=08.25,y=-6.5,hjust=0,label='Other') +
+geom_text(data=data.frame(0),x=11.25,y=-6.5,hjust=0,label='Th2') +
+geom_text(data=data.frame(0),x=13.25,y=-6.5,hjust=0,label='Th1') +
+geom_linerange(data=heatall, aes(x=Cytokine, ymin=Lower_CI, ymax=Upper_CI, color = Sex),size=.8,position=position_dodge(width = 0.5)) +
+geom_hline(yintercept=0, lty=2) +
+geom_point(data=heatall, aes(x=Cytokine, y=Estimate, fill = Sex),size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+scale_fill_manual(values=barCOLS_1, guide=TRUE)+
+scale_color_manual(values=dotCOLS_1, guide=FALSE)+
+scale_y_continuous(name="Eosinophil Effect (95% CI)", limits = c(-7, 2), breaks=seq(-6,2,2)) +
+theme_classic(base_size=18 ) +
+facet_wrap(~Medum, ncol = 2, ) + theme(axis.title.y = element_blank(), strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=20), legend.title = element_blank(),axis.text.x = element_text(vjust =1, hjust=0, size = 16)) + guides(fill = guide_legend(override.aes = list(linetype=0), reverse = TRUE)) + coord_flip() 
+```
+
+Now add in anti-helminth data. it appears that we have treatments for non-helminth infections in here (metronidazol, tinidizol) so we'll NA those and make yearrs priior anti helminth NA for those as well. Gah. 
+
+```{r}
+antistim = read.csv("~/Desktop/Tsimane/stim_anti_helminths.csv", stringsAsFactors = FALSE)
+antistim = antistim %>% dplyr::select(vid, years_prior_anti_helminth, type_anti_helminth)
+antistim$type_anti_helminth = ifelse(antistim$type_anti_helminth == "metronidazol" | antistim$type_anti_helminth == "tinidazol", NA, antistim$type_anti_helminth)
+
+# merge with re_all
+reall_anti = merge(re_all, antistim, by = "vid", all.x = TRUE)
+
+```
+
+Make forest plots for additional variables.
+
+```{r}
+allvar_forest = read.csv("~/Desktop/Tsimane/All_variables_forest.csv", stringsAsFactors = FALSE)
+
+# special characterss
+allvar_forest$Cytokine = ifelse(allvar_forest$Cytokine == "IFNg", "IFN\u03B3", allvar_forest$Cytokine)
+allvar_forest$Cytokine = ifelse(allvar_forest$Cytokine == "1b", "IL-1\u03B2", allvar_forest$Cytokine)
+allvar_forest$Cytokine = ifelse(allvar_forest$Cytokine == "TNF", "TNF-\u03B1", allvar_forest$Cytokine)
+allvar_forest$Cytokine = ifelse(allvar_forest$Cytokine == "GM", "GM-CSF", allvar_forest$Cytokine)
+
+# order variables
+order3 = c( 'TNF-α', 'GM-CSF', 'IL-13', 'IL-12p70', 'IL-10', 'IL-8', 'IL-7', 'IL-6', 'IL-5', 'IL-4', 'IL-2','IL-1β', 'IFNγ')
+allvar_forest$Cytokine = factor(allvar_forest$Cytokine, levels=order3)
+
+order4 = c(  'M', 'F')
+allvar_forest$Sex = factor(allvar_forest$Sex, levels=order4)
+
+# BMI 
+bmi_forest = allvar_forest[allvar_forest$Predictor == "BMI",]
+
+dotCOLS_bmi = c("#f9b282", "#a6d8f0")
+barCOLS_bmi = c("#de6b35", "#008fd5")
+
+bmi = ggplot() +
+geom_rect(data=ToothGrowth,xmin = 0, xmax = 8.5, ymin = -7, ymax = 3, fill = '#e6e8e8', alpha = 0.03) + geom_rect(data=ToothGrowth,xmin = 8.5, xmax = 11.5, ymin = -7, ymax = 3, fill = '#fdcdac', alpha = 0.01) + geom_rect(data=ToothGrowth,xmin = 11.5, xmax = 14, ymin = -7, ymax = 3, fill = '#b3e2cd', alpha = 0.01) +
+geom_text(data=data.frame(0),x=08.25,y=-6.5,hjust=0,label='Other') +
+geom_text(data=data.frame(0),x=11.25,y=-6.5,hjust=0,label='Th2') +
+geom_text(data=data.frame(0),x=13.25,y=-6.5,hjust=0,label='Th1') +
+geom_linerange(data=bmi_forest, aes(x=Cytokine, ymin=Lower_CI, ymax=Upper_CI, color = Sex),size=.8,position=position_dodge(width = 0.5)) +
+geom_hline(yintercept=0, lty=2) +
+geom_point(data=bmi_forest, aes(x=Cytokine, y=Estimate, fill = Sex),size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+scale_fill_manual(values=barCOLS_bmi, guide=TRUE)+
+scale_color_manual(values=dotCOLS_bmi, guide=FALSE)+
+scale_y_continuous(name="BMI Effect (95% CI)", limits = c(-7, 2), breaks=seq(-6,2,2)) + 
+theme_classic(base_size=18 ) +
+facet_wrap(~Medum, ncol = 2, ) + theme(axis.title.y = element_blank(), strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=20), legend.title = element_blank(),axis.text.x = element_text(vjust =1, hjust=0, size = 16)) + guides(fill = guide_legend(override.aes = list(linetype=0), reverse = TRUE)) + coord_flip() + labs(tag = "a")
+
+# Age 
+age_forest = allvar_forest[allvar_forest$Predictor == "Age (continuous)",]
+
+age = ggplot() +
+geom_rect(data=ToothGrowth,xmin = 0, xmax = 8.5, ymin = -7, ymax = 3, fill = '#e6e8e8', alpha = 0.03) + geom_rect(data=ToothGrowth,xmin = 8.5, xmax = 11.5, ymin = -7, ymax = 3, fill = '#fdcdac', alpha = 0.01) + geom_rect(data=ToothGrowth,xmin = 11.5, xmax = 14, ymin = -7, ymax = 3, fill = '#b3e2cd', alpha = 0.01) +
+geom_text(data=data.frame(0),x=08.25,y=-6.5,hjust=0,label='Other') +
+geom_text(data=data.frame(0),x=11.25,y=-6.5,hjust=0,label='Th2') +
+geom_text(data=data.frame(0),x=13.25,y=-6.5,hjust=0,label='Th1') +
+geom_linerange(data=age_forest, aes(x=Cytokine, ymin=Lower_CI, ymax=Upper_CI, color = Sex),size=.8,position=position_dodge(width = 0.5)) +
+geom_hline(yintercept=0, lty=2) +
+geom_point(data=age_forest, aes(x=Cytokine, y=Estimate, fill = Sex),size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+scale_fill_manual(values=barCOLS_bmi, guide=FALSE)+
+scale_color_manual(values=dotCOLS_bmi, guide=FALSE)+
+scale_y_continuous(name="Age Effect (95% CI)", limits = c(-7, 2), breaks=seq(-6,2,2)) + 
+theme_classic(base_size=18 ) +
+facet_wrap(~Medum, ncol = 2, ) + theme(axis.title.y = element_blank(), strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=20), legend.title = element_blank(),axis.text.x = element_text(vjust =1, hjust=0, size = 16)) + coord_flip()  + labs(tag = "b")
+
+# Pregnancy 
+preg_forest = allvar_forest[allvar_forest$Predictor == "Pregnant (Y)",]
+dotCOLS_preg = c("#a6d8f0", "#f9b282")
+barCOLS_preg = c("#008fd5", "#de6b35")
+
+preg = ggplot() +
+geom_rect(data=ToothGrowth,xmin = 0, xmax = 8.5, ymin = -7, ymax = 3, fill = '#e6e8e8', alpha = 0.03) + geom_rect(data=ToothGrowth,xmin = 8.5, xmax = 11.5, ymin = -7, ymax = 3, fill = '#fdcdac', alpha = 0.01) + geom_rect(data=ToothGrowth,xmin = 11.5, xmax = 14, ymin = -7, ymax = 3, fill = '#b3e2cd', alpha = 0.01) +
+geom_text(data=data.frame(0),x=08.25,y=-6.5,hjust=0,label='Other') +
+geom_text(data=data.frame(0),x=11.25,y=-6.5,hjust=0,label='Th2') +
+geom_text(data=data.frame(0),x=13.25,y=-6.5,hjust=0,label='Th1') +
+geom_linerange(data=preg_forest, aes(x=Cytokine, ymin=Lower_CI, ymax=Upper_CI, color = Sex),size=.8,position=position_dodge(width = 0.5)) +
+geom_hline(yintercept=0, lty=2) +
+geom_point(data=preg_forest, aes(x=Cytokine, y=Estimate, fill = Sex),size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+scale_fill_manual(values=barCOLS_preg, guide=FALSE)+
+scale_color_manual(values=dotCOLS_preg, guide=FALSE)+
+scale_y_continuous(name="Pregnancy Effect (95% CI)", limits = c(-7, 3), breaks=seq(-6,2,2)) + 
+theme_classic(base_size=18 ) +
+facet_wrap(~Medum, ncol = 2, ) + theme(axis.title.y = element_blank(), strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=20), legend.title = element_blank(),axis.text.x = element_text(vjust =1, hjust=0, size = 16)) + coord_flip()  + labs(tag = "d")
+
+# Leukocytes 
+leuk_forest = allvar_forest[allvar_forest$Predictor == "Leukocyte count (logged)",]
+
+leuk = ggplot() +
+geom_rect(data=ToothGrowth,xmin = 0, xmax = 8.5, ymin = -7, ymax = 3, fill = '#e6e8e8', alpha = 0.03) + geom_rect(data=ToothGrowth,xmin = 8.5, xmax = 11.5, ymin = -7, ymax = 3, fill = '#fdcdac', alpha = 0.01) + geom_rect(data=ToothGrowth,xmin = 11.5, xmax = 14, ymin = -7, ymax = 3, fill = '#b3e2cd', alpha = 0.01) +
+geom_text(data=data.frame(0),x=08.25,y=-6.5,hjust=0,label='Other') +
+geom_text(data=data.frame(0),x=11.25,y=-6.5,hjust=0,label='Th2') +
+geom_text(data=data.frame(0),x=13.25,y=-6.5,hjust=0,label='Th1') +
+geom_linerange(data=leuk_forest, aes(x=Cytokine, ymin=Lower_CI, ymax=Upper_CI, color = Sex),size=.8,position=position_dodge(width = 0.5)) +
+geom_hline(yintercept=0, lty=2) +
+geom_point(data=leuk_forest, aes(x=Cytokine, y=Estimate, fill = Sex),size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+scale_fill_manual(values=barCOLS_bmi, guide=FALSE)+
+scale_color_manual(values=dotCOLS_bmi, guide=FALSE)+
+scale_y_continuous(name="Leukocyte Effect (95% CI)", limits = c(-7, 3), breaks=seq(-6,2,2)) + 
+theme_classic(base_size=18 ) +
+facet_wrap(~Medum, ncol = 2, ) + theme(axis.title.y = element_blank(), strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=20), legend.title = element_blank(),axis.text.x = element_text(vjust =1, hjust=0, size = 16))  + guides(fill = guide_legend(override.aes = list(linetype=0), reverse = TRUE)) + coord_flip()  + labs(tag = "c")
+
+# put all these bbs into single figure
+library(ggpubr)
+
+pdf(file="~/Desktop/Tsimane/othervariable_onepage.pdf",useDingbats=TRUE,height=20,width=20) 
+ggarrange(bmi, age, leuk, preg, ncol=2,nrow=2,widths=c(2,2, 2,2, 2,2, 2,2),newpage=FALSE)
+dev.off()
+```
+
+Define pro- and anti-inflammatory categories
+
+```{r}
+# add 1 and then log before z-score
+addlogfun = function(x){log(x+1)}
+addlog = as.data.frame(apply(re_all[,2:66], 2, addlogfun))
+
+# Z-score transformation
+normFunc <- function(x){(x-mean(x, na.rm = T))/sd(x, na.rm = T)}
+forz = apply(addlog[,1:65], 2, normFunc)
+forz1 = as.data.frame(cbind(forz, re_all$vid, re_all$eos_st, re_all$male_stim))
+
+# pro in LPS
+lpsfirst_pro = forz1 %>% dplyr::select(V66, V67,V68, IFNg_stim_lps, IL.2_stim_lps, IL.6_stim_lps, IL.8_stim_lps, IL.12p70_stim_lps, TNF.a_stim_lps)
+lpsfirst_pro = lpsfirst_pro %>% dplyr::rename(vid = V66, eos_st = V67, male = V68)
+lps_means_pro = lpsfirst_pro %>% dplyr::select(-c(vid, eos_st, male))
+lps_means_pro = mutate_all(lps_means_pro, function(x) as.numeric(as.character(x)))
+lps_means_pro$z_th1 = rowMeans(lps_means_pro, na.rm = TRUE)
+lps_z_pro = cbind(lps_means_pro, lpsfirst_pro$vid, lpsfirst_pro$eos_st, lpsfirst_pro$male)
+lps_z_pro = lps_z_pro %>% dplyr::rename(vid = 'lpsfirst_pro$vid', eos_st = 'lpsfirst_pro$eos_st', male = 'lpsfirst_pro$male')
+lps_z_pro$eos_st = as.numeric(as.character(lps_z_pro$eos_st))
+
+# add metadata
+new_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,c_leucocitos, c_eosinophils, pregnant ) 
+
+# merge
+lps_pro = left_join(lps_z_pro, new_meta)
+lps_pro = unique(lps_pro)
+
+# split by sex
+fem_pro = lps_pro[lps_pro$male_stim == 0,]
+maless_pro = lps_pro[lps_pro$male_stim == 1,]
+
+# model 
+summary(glm(data = fem_pro, z_th1 ~ bmi + stim_age + log(eos_st) + pregnant + log(c_leucocitos)))
+summary(glm(data = maless_pro, z_th1 ~ bmi + stim_age + log(eos_st) +  log(c_leucocitos)))
+
+## now anti in LPS
+lpsfirst_anti = forz1 %>% dplyr::select(V66, V67, IL.4_stim_lps,IL.5_stim_lps, IL.10_stim_lps, IL.13_stim_lps)
+lpsfirst_anti = lpsfirst_anti %>% dplyr::rename(vid = V66, eos_st = V67)
+row_means_anti = lpsfirst_anti %>% dplyr::select(-c(vid, eos_st))
+row_means_anti = mutate_all(row_means_anti, function(x) as.numeric(as.character(x)))
+row_means_anti$z_th2 = rowMeans(row_means_anti)
+lps_z_anti = cbind(row_means_anti, lpsfirst_anti$vid, lpsfirst_anti$eos_st)
+lps_z_anti = lps_z_anti %>% dplyr::rename(vid = 'lpsfirst_anti$vid', eos_st = 'lpsfirst_anti$eos_st')
+lps_z_anti$eos_st = as.numeric(as.character(lps_z_anti$eos_st))
+
+# add metadata
+new_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,c_leucocitos, c_eosinophils, pregnant ) 
+
+# merge
+anti_lps = left_join(lps_z_anti, new_meta)
+anti_lps = unique(anti_lps)
+
+# split by sex
+fem_anti = anti_lps[anti_lps$male_stim == 0,]
+male_anti = anti_lps[anti_lps$male_stim == 1,]
+
+# model
+summary(glm(data = fem_anti, z_th2 ~ bmi + stim_age + log(eos_st) + pregnant + log(c_leucocitos)))
+summary(glm(data = male_anti, z_th2 ~ bmi + stim_age + log(eos_st) + log(c_leucocitos)))
+
+# pro in H1N1
+hn_pro = forz1 %>% dplyr::select(V66, V67,IFNg_stim_h1n1, IL.2_stim_h1n1)
+hn_pro = hn_pro %>% dplyr::rename(vid = V66, eos_st = V67)
+h1n1_means_pro = hn_pro %>% dplyr::select(-c(vid, eos_st))
+h1n1_means_pro = mutate_all(h1n1_means_pro, function(x) as.numeric(as.character(x)))
+h1n1_means_pro$z_th1 = rowMeans(h1n1_means_pro)
+h1n1_z_pro = cbind(h1n1_means_pro, hn_pro$vid, hn_pro$eos_st)
+h1n1_z_pro = h1n1_z_pro %>% dplyr::rename(vid = 'hn_pro$vid', eos_st = 'hn_pro$eos_st')
+h1n1_z_pro$eos_st = as.numeric(as.character(h1n1_z_pro$eos_st))
+
+# add metadata
+new_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,c_leucocitos, c_eosinophils, pregnant ) 
+
+# merge
+pro_h1n1 = left_join(h1n1_z_pro, new_meta)
+pro_h1n1 = unique(pro_h1n1)
+
+# split by sex
+man_h1n1_pro = pro_h1n1[pro_h1n1$male_stim == 1,]
+fem_h1n1_pro = pro_h1n1[pro_h1n1$male_stim == 0,]
+
+# model
+summary(glm(data = fem_h1n1_pro, z_th1 ~ bmi + stim_age + log(eos_st) + pregnant + log(c_leucocitos))) 
+summary(glm(data = man_h1n1_pro, z_th1 ~ bmi + stim_age + log(eos_st) + log(c_leucocitos)))
+
+## now anti in H1n1
+h1n1_anti = forz1 %>% dplyr::select(V66, V67, IL.4_stim_h1n1,IL.5_stim_h1n1,IL.10_stim_h1n1, IL.13_stim_h1n1)
+h1n1_anti = h1n1_anti %>% dplyr::rename(vid = V66, eos_st = V67)
+h1n1_means_anti = h1n1_anti %>% dplyr::select(-c(vid, eos_st))
+h1n1_means_anti = mutate_all(h1n1_means_2, function(x) as.numeric(as.character(x)))
+h1n1_means_anti$z_th2 = rowMeans(h1n1_means_anti)
+h1n1_z_anti = cbind(h1n1_means_anti, h1n1_anti$vid, h1n1_anti$eos_st)
+h1n1_z_anti = h1n1_z_anti %>% dplyr::rename(vid = 'h1n1_anti$vid', eos_st = 'h1n1_anti$eos_st')
+h1n1_z_anti$eos_st = as.numeric(as.character(h1n1_z_anti$eos_st))
+
+# add metadata
+new_meta = stim_nokids %>% dplyr::select(vid, hrich, prich, h_pres, p_pres, male_stim, stim_age, PSR, bmi,c_leucocitos, c_eosinophils, pregnant ) 
+
+# merge
+h1n1_z_anti = left_join(h1n1_z_anti, new_meta)
+h1n1_z_anti = unique(h1n1_z_anti)
+
+# split by sex
+fem_h1n1_anti = h1n1_z_anti[h1n1_z_anti$male_stim == 0,]
+man_h1n1_anti = h1n1_z_anti[h1n1_z_anti$male_stim == 1,]
+
+# model
+summary(glm(data = fem_h1n1_anti, z_th2 ~ bmi + stim_age + log(eos_st) + pregnant + log(c_leucocitos)))
+summary(glm(data = man_h1n1_anti, z_th2 ~ bmi + stim_age + log(eos_st) + log(c_leucocitos)))
+
+# now make tables for these and then make supplementary forest plots for these ones
+
+# create forest plot df. cytokine, beta, beta+1.96*se, beta-1.96*se
+suppforest = read.csv("~/Desktop/Tsimane/Supp_forest.csv", stringsAsFactors = FALSE)
+suppforest = suppforest[!(is.na(suppforest$Type)),]
+suppforest_redo = read.csv("~/Desktop/Tsimane/Supp_forest_redo.csv", stringsAsFactors = FALSE)
+suppforest_redo = suppforest_redo[!(is.na(suppforest_redo$Type)),]
+
+order = c( 'LPS', 'H1N1')
+suppforest_redo$Type = factor(suppforest_redo$Type, levels=order)
+
+order1 = c( 'Male', 'Female')
+suppforest_redo$Sex = factor(suppforest_redo$Sex, levels=order1)
+
+dotCOLS = c("#f9b282", "#a6d8f0")
+barCOLS = c("#de6b35", "#008fd5")
+
+supptable = ggplot(suppforest_redo, aes(x=Type, y=Estimate, ymin=Lower_CI, ymax=Upper_CI, color = Sex, fill = Sex))+
+ geom_linerange(size=.8,position=position_dodge(width = 0.5)) +
+geom_hline(yintercept=0, lty=2) +
+geom_point(size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+scale_fill_manual(values=barCOLS, guide=TRUE)+
+scale_color_manual(values=dotCOLS, guide=FALSE)+
+scale_x_discrete(name="") +
+scale_y_continuous(name="Eosinophil Effect (95% CI)", limits = c(-2, 2)) +
+coord_flip() +
+theme_classic(base_size=18 ) +
+  facet_wrap(~Set, ncol = 1, ) + theme(strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=18), legend.title = element_blank()) + guides(fill = guide_legend(override.aes = list(linetype=0), reverse = TRUE))
+
+ggsave("proanti.pdf")
+ggsave("proanti.jpg")
+
+```
+
+Calculate meta-analysis metric
+
+```{r}
+library(meta)
+# make meta term for H1N1 and LPS separately and also within each sex
+H_F = heatall[heatall$Medum == "H1N1" & heatall$Sex == "Female",]
+H_M = heatall[heatall$Medum == "H1N1" & heatall$Sex == "Male",]
+H_A = heatall[heatall$Medum == "H1N1",]
+
+L_F = heatall[heatall$Medum == "LPS" & heatall$Sex == "Female",]
+L_M = heatall[heatall$Medum == "LPS" & heatall$Sex == "Male",]
+L_A = heatall[heatall$Medum == "LPS",]
+
+H_F_mod = metagen(Estimate, Std..Error,data=H_F, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
+H_M_mod = metagen(Estimate, Std..Error,data=H_M, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
+H_A_mod = metagen(Estimate, Std..Error,data=H_A, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
+
+L_F_mod = metagen(Estimate, Std..Error,data=L_F, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
+L_M_mod = metagen(Estimate, Std..Error,data=L_M, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
+L_A_mod = metagen(Estimate, Std..Error,data=L_A, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
+
+# add meta results to df
+met = read.csv("~/Desktop/Tsimane/meta.csv", stringsAsFactors = FALSE)
+heatmeta = rbind(heatall, met)
+
+# now remove the overrall ones
+heatmeta = heatmeta[!(heatmeta$Sex== "All"),]
+
+order1 = c( 'Male', 'Female')
+heatmeta$Sex = factor(heatmeta$Sex, levels=order1)
+
+# order variables
+order3 = c('Overall', 'TNF-α', 'GM-CSF', 'IL-13', 'IL-12p70', 'IL-10', 'IL-8', 'IL-7', 'IL-6', 'IL-5', 'IL-4', 'IL-2','IL-1β', 'IFNγ')
+heatmeta$Cytokine = factor(heatmeta$Cytokine, levels=order3)
+
+dotCOLS_meta = c("#f9b282", "#a6d8f0")
+barCOLS_meta = c("#de6b35", "#008fd5")
+
+ggplot() +
+  geom_rect(data=ToothGrowth,xmin = 0, xmax = 1.5, ymin = -7, ymax = 3, fill = '#bbd0f2', alpha = 0.01) +
+  geom_rect(data=ToothGrowth,xmin = 2, xmax = 8.5, ymin = -7, ymax = 3, fill = '#e6e8e8', alpha = 0.01) +
+  geom_rect(data=ToothGrowth,xmin = 8.5, xmax = 11.5, ymin = -7, ymax = 3, fill = '#fae8c8', alpha = 0.01) + geom_rect(data=ToothGrowth,xmin = 11.5, xmax = 15, ymin = -7, ymax = 3, fill = '#eddff5', alpha = 0.05) +
+geom_text(data=data.frame(0),x=0.25,y=-6.5,hjust=0,label='') +
+geom_text(data=data.frame(0),x=08,y=-6.5,hjust=0,label='Other') +
+geom_text(data=data.frame(0),x=11,y=-6.5,hjust=0,label='Th2') +
+geom_text(data=data.frame(0),x=14,y=-6.5,hjust=0,label='Th1') +
+geom_linerange(data=heatmeta, aes(x=Cytokine, ymin=Lower_CI, ymax=Upper_CI, color = Sex),size=.8,position=position_dodge(width = 0.5)) +
+geom_hline(yintercept=0, lty=2) +
+geom_point(data=heatmeta, aes(x=Cytokine, y=Estimate, fill = Sex),size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+scale_fill_manual(values=barCOLS_meta, guide=TRUE)+
+scale_color_manual(values=dotCOLS_meta, guide=FALSE)+
+scale_y_continuous(name="Eosinophil Effect (95% CI)", limits = c(-7, 2), breaks=seq(-6,2,2)) +
+theme_classic(base_size=18 ) +
+facet_wrap(~Medum, ncol = 2, ) + theme(axis.title.y = element_blank(), strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=20), legend.title = element_blank(),axis.text.x = element_text(vjust =1, hjust=0, size = 16)) + guides(fill = guide_legend(override.aes = list(linetype=0), reverse = TRUE)) + coord_flip() 
+
+```
+
+Circulating stims (non-stimulation)
+
+```{r}
+
+######################### Women ######################### 
+
+summary(glm(data = wom_all, log(ifng) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_1b) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_2) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_4) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_5) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_6) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_7) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_8) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_10) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_12p70) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(il_13) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(gm_csf) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = wom_all, log(tnf_a) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+
+######################### Men ######################### 
+
+summary(glm(data = men_all, log(ifng) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_1b) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_2) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_4) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_5) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_6) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_7) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_8) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_10) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_12p70) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(il_13) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(gm_csf) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+summary(glm(data = men_all, log(tnf_a) ~ bmi + stim_age + pregnant + log(eos_st) +  log(c_leucocitos)))
+```
+
+Plot serum cytokines 
+
+```{r}
+serum = read.csv("~/Desktop/Tsimane/serum_forest.csv", stringsAsFactors = FALSE)
+
+# select only eosinophils
+serum = serum[serum$Predictor.Variables == "Eosinophil count (logged)",]
+
+# make meta term for within each sex
+S_F = serum[serum$Sex == "Female",]
+S_M = serum[serum$Sex == "Male",]
+
+S_F_mod = metagen(Estimate, Std..Error,data=S_F, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
+S_M_mod = metagen(Estimate, Std..Error,data=S_M, studlab=paste(Cytokine),comb.fixed = TRUE,comb.random = FALSE, prediction=TRUE,sm="SMD")
+
+# add overall meta result to heatall df
+serum = read.csv("~/Desktop/Tsimane/serum_forest.csv", stringsAsFactors = FALSE)
+
+# fix cytokine names
+serum$Cytokine = ifelse(serum$Cytokine == "IFNg", "IFN\u03B3", serum$Cytokine)
+serum$Cytokine = ifelse(serum$Cytokine == "1b", "IL-1\u03B2", serum$Cytokine)
+serum$Cytokine = ifelse(serum$Cytokine == "TNF", "TNF-\u03B1", serum$Cytokine)
+serum$Cytokine = ifelse(serum$Cytokine == "GM", "GM-CSF", serum$Cytokine)
+
+# select only eosinophils
+serum = serum[serum$Predictor.Variables == "Eosinophil count (logged)",]
+
+# define colors and order
+dotCOLS_1 = c( "#f9b282","#a6d8f0")
+barCOLS_1 = c("#de6b35", "#008fd5" )
+
+order5 = c('Overall', 'TNF-α', 'GM-CSF','IL-12p70', 'IL-10', 'IL-8', 'IL-7', 'IL-6', 'IL-1β','IL-13','IL-5', 'IL-4', 'IL-2', 'IFNγ')
+serum$Cytokine = factor(serum$Cytokine, levels=order5)
+
+order4 = c(  'Male', 'Female')
+serum$Sex = factor(serum$Sex, levels=order4)
+
+# make categories th1/th2/ambiguous
+serum$type = ifelse(serum$Cytokine == "IFNγ" | serum$Cytokine == "IL-2", "Th1", NA)
+serum$type = ifelse(serum$Cytokine == "IL-4" | serum$Cytokine == "IL-5" | serum$Cytokine == "IL-13", "Th2", "Ambiv")
+
+ggplot() +
+  geom_rect(data=ToothGrowth,xmin = 0, xmax = 1.5, ymin = -7, ymax = 4, fill = '#bbd0f2', alpha = 0.01) +
+  geom_rect(data=ToothGrowth,xmin = 2, xmax = 8.5, ymin = -7, ymax = 4, fill = '#e6e8e8', alpha = 0.01) +
+  geom_rect(data=ToothGrowth,xmin = 8.5, xmax = 11.5, ymin = -7, ymax = 4, fill = '#fae8c8', alpha = 0.01) + geom_rect(data=ToothGrowth,xmin = 11.5, xmax = 15, ymin = -7, ymax = 4, fill = '#eddff5', alpha = 0.05) +
+geom_text(data=data.frame(0),x=0.25,y=-6.5,hjust=0,label='') +
+geom_text(data=data.frame(0),x=08,y=-6.5,hjust=0,label='Other') +
+geom_text(data=data.frame(0),x=11,y=-6.5,hjust=0,label='Th2') +
+geom_text(data=data.frame(0),x=14,y=-6.5,hjust=0,label='Th1') +
+geom_linerange(data=serum, aes(x=Cytokine, ymin=Lower_CI, ymax=Upper_CI, color = Sex),size=.8,position=position_dodge(width = 0.5)) +
+geom_hline(yintercept=0, lty=2) +
+geom_point(data=serum, aes(x=Cytokine, y=Estimate, fill = Sex),size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+scale_fill_manual(values=barCOLS_meta, guide=TRUE)+
+scale_color_manual(values=dotCOLS_meta, guide=FALSE)+
+scale_y_continuous(name="Eosinophil Effect (95% CI)", limits = c(-7, 2), breaks=seq(-6,2,2)) + 
+theme_classic(base_size=18 ) +
+facet_wrap(~Medum, ncol = 2, ) + theme(axis.title.y = element_blank(), strip.background=element_blank() , panel.grid.major.x = element_line(size=0.2, color = '#cccccc'), strip.text = element_text(size=20), legend.title = element_blank(),axis.text.x = element_text(vjust =1, hjust=0, size = 16)) + guides(fill = guide_legend(override.aes = list(linetype=0), reverse = TRUE)) + coord_flip() 
+```
+
+Parasite prevalence
+
+```{r}
+
+colSums(wom_all["a_lum"], na.rm = TRUE) #14/82 17%
+colSums(men_all["a_lum"], na.rm = TRUE) #25/97 25%
+
+colSums(wom_all["t_trich"], na.rm = TRUE) #5/82 6%
+colSums(men_all["t_trich"], na.rm = TRUE) #5/97 5%
+
+colSums(wom_all["unc"], na.rm = TRUE) #69/82 84%
+colSums(men_all["unc"], na.rm = TRUE) #66/97 68%
+
+summary(glm(a_lum ~ male_stim*stim_age, family = "binomial", data = re_all))
+summary(glm(t_trich ~ male_stim*stim_age, family = "binomial", data = re_all))
+summary(glm(unc ~ male_stim*stim_age, family = "binomial", data = re_all))
+summary(glm(strong ~ male_stim*stim_age, family = "binomial", data = re_all))
+
+```
