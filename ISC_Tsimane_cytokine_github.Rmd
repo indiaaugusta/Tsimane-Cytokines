@@ -15,24 +15,9 @@ library(plyr)
 library(ggplot2)
 
 # read in file
-re_all = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/complete_file.csv", stringsAsFactors = FALSE) # stimulation data
+re_all = read.csv("https://github.com/indiaaugusta/Tsimane-Cytokines/blob/master/complete_file.csv", stringsAsFactors = FALSE) # stimulation data with serum cytokines, stimulation cytokines per medium, all parasite data, and eosinophil + all WBC data.
 
-
-```
-
-Now we have the full dataset. It includes serum cytokines, stimulation cytokines per medium, all parasite data, and eosinophils + leucocytes.
-
-```{r}
-# standardize eosinophilis
-re_all$eos_st = (re_all$c_leucocitos*re_all$c_eosinophils)/100
-hist(re_all$eos_st) 
-
-nrow(re_all) # 790
-nrow(unique(re_all)) # 179
-
-re_all = unique(re_all)
-nrow(re_all) # 179
-
+# eosinophil counts
 mean(re_all$eos_st, na.rm = TRUE) # 2229.737
 median(re_all$eos_st, na.rm = TRUE) # 1950
 
